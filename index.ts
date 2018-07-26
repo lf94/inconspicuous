@@ -12,27 +12,45 @@ type BitIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 function hide(cover: CoverFile, input: Message): [StegoFile, StegoKey | EmptyKey] {
     let words = cover.split(' ');
     const wordsLength = words.length;
-    const inputLength = input.length;
     let key = '';
 
-    for (let inputIndex = 0; inputIndex < inputLength; inputIndex++) {
-        const byte = input[inputIndex];
-
+    const bits = input.reduce((bits, byte) => {
         for (let index: BitIndex = 7; index >= 0; index--) {
-            const bit = (byte >> index) & 0x01;
-
-            const wordIndex = words.findIndex(word => word[0] !== word[word.length - 1]);
-            if (wordIndex < 0) {
-                return [cover, ''];
-            }
-            
-            const word = words[wordIndex];
-            const firstLetter = word[0];
-            const lastLetter = word[word.length - 1];
-            words = words.slice(wordIndex + 1);
-           
-            key += bit === 0 ? firstLetter : lastLetter;
+            bits.push((byte >> index) & 0x01);
         }
+        return bits;
+    }, []);
+
+    const bitsLength = bits.length;
+    let bitIndex = 0;
+
+    while (bitIndex < bitsLength) {
+        const wordIndex = words.findIndex(word => word[0] !== word[word.length - 1]);
+        if (wordIndex < 0) {
+            return [cover, ''];
+        }
+
+        const word = words[wordIndex];
+        const letterRounds = parseInt(`${word.length / 2}`);
+
+        for (let letterIndex = 0; letterIndex < letterRounds; letterIndex++) {
+            const frontalLetter = word[letterIndex];
+            const posteriorLetter = word[(word.length - 1) - letterIndex];
+
+            if (frontalLetter === posteriorLetter) {
+                continue;
+            }
+
+            const bit = bits[bitIndex];
+            bitIndex++;
+            if (bitIndex > bitsLength) {
+                break;
+            }
+             
+            key += bit === 0 ? frontalLetter : posteriorLetter;
+        }
+
+        words = words.slice(wordIndex + 1);
     }
 
     return [cover, key];
@@ -51,8 +69,6 @@ function seek([file, key]: [StegoFile, StegoKey]): Message {
     let byte = 0;
 
     while (keyIndex < keyLength) {
-        const keyCharacter = key[keyIndex];
-
         const wordIndex = words.findIndex(word => word[0] !== word[word.length - 1]);
 
         if (wordIndex < 0) {
@@ -60,26 +76,41 @@ function seek([file, key]: [StegoFile, StegoKey]): Message {
         }
         
         const word = words[wordIndex];
-        const firstLetter = word[0];
-        const lastLetter = word[word.length - 1];
+        const letterRounds = parseInt(`${word.length / 2}`);
+
+        for (let letterIndex = 0; letterIndex < letterRounds; letterIndex++) {
+            const frontalLetter = word[letterIndex];
+            const posteriorLetter = word[(word.length - 1) - letterIndex];
+
+            if (frontalLetter === posteriorLetter) {
+                continue;
+            }
+
+            const keyCharacter = key[keyIndex];
+
+            byte = (byte << 1);
+
+            if (keyCharacter === frontalLetter) {
+                byte |= 0;
+            }
+
+            if (keyCharacter === posteriorLetter) {
+                byte |= 1;
+            }
+
+            keyIndex++;
+
+            if (keyIndex % 8 === 0) {
+                message[messageIndex++] = byte;
+                byte = 0;
+            }
+
+            if (keyIndex > keyLength) {
+                break;
+            }
+        }
+
         words = words.slice(wordIndex + 1);
-
-        byte = (byte << 1);
-
-        if (keyCharacter === firstLetter) {
-            byte |= 0;
-        }
-
-        if (keyCharacter === lastLetter) {
-            byte |= 1;
-        }
-
-        keyIndex++;
-
-        if (keyIndex % 8 === 0) {
-            message[messageIndex++] = byte;
-            byte = 0;
-        }
     }
 
     return message;
